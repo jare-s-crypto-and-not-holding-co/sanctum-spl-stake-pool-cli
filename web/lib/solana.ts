@@ -82,7 +82,11 @@ export async function fetchPoolRatio(
   ]);
 
   const total = leakReserve + dontLeakReserve;
-  const r = total === BigInt(0) ? 0 : Math.max(0, Math.min(1, Number(leakReserve) / Number(total)));
+  // Square-root curve: r = sqrt(Leak / total).
+  // DontLeak must square their position to halve each decrement — exponential cost to suppress.
+  // At parity r≈0.71; to hold r<0.5 DontLeak needs 3× more tokens; r<0.1 needs 99×.
+  const p = total === BigInt(0) ? 0 : Number(leakReserve) / Number(total);
+  const r = Math.sqrt(Math.max(0, Math.min(1, p)));
 
   return { leakReserve, dontLeakReserve, r, slot };
 }
