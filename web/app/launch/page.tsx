@@ -1,15 +1,5 @@
 "use client";
 
-/**
- * /launch — E2E content deploy wizard.
- *
- * Steps:
- *   1. Connect wallet
- *   2. Fill in content details + upload file
- *   3. Deploy Pool 2 (DontLeak/Leak) — two on-chain txs
- *   4. Encrypt with Lit Protocol
- *   5. Register — content goes live
- */
 import { useState, useRef } from "react";
 import { Connection } from "@solana/web3.js";
 import { upload } from "@vercel/blob/client";
@@ -25,6 +15,23 @@ interface FormState {
   description: string;
   contentType: string;
   file:        File | null;
+}
+
+// Get a client token server-side, then PUT file directly to Blob from browser.
+// The file never passes through our serverless function → no 4.5 MB limit.
+async function blobUpload(pathname: string, file: File): Promise<string> {
+  const res = await fetch("/api/blob/presign", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ pathname, contentType: file.type || "application/octet-stream" }),
+  });
+  if (!res.ok) {
+    const { error } = await res.json().catch(() => ({ error: "Presign failed" }));
+    throw new Error(error);
+  }
+  const { clientToken } = await res.json();
+  const blob = await upload(pathname, file, { access: "public", token: clientToken });
+  return blob.url;
 }
 
 export default function LaunchPage() {
@@ -61,34 +68,28 @@ export default function LaunchPage() {
     try {
       const conn = new Connection(RPC, "confirmed");
 
-      // Upload file directly to Vercel Blob (bypasses 4.5MB API route limit)
+      // Content file — presign → browser PUT directly to Blob (no serverless body limit)
       let fileUrl = `https://leak.markets/content/placeholder`;
       if (form.file) {
         addLog(`Uploading ${form.file.name} (${(form.file.size / 1024).toFixed(1)} KB)…`);
         const pathname = `content/${Date.now()}-${form.file.name.replace(/[^a-zA-Z0-9._-]/g, "_")}`;
-        const blob = await upload(pathname, form.file, {
-          access: "public",
-          handleUploadUrl: "/api/blob/upload",
-        });
-        fileUrl = blob.url;
-        addLog(`Uploaded: ${blob.url.slice(0, 60)}…`);
+        fileUrl = await blobUpload(pathname, form.file);
+        addLog(`Uploaded: ${fileUrl.slice(0, 60)}…`);
       }
 
-      // Upload token metadata JSON
-      const slug    = form.title.toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 24);
-      const symbol  = ("DL" + slug.replace(/-/g, "").toUpperCase()).slice(0, 8);
-      const metaRes = await fetch("/api/blob/token-metadata", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name:        `DontLeak: ${form.title}`,
-          symbol,
-          description: form.description,
-          image:       fileUrl,
-        }),
+      // Metadata JSON — built in browser, uploaded the same way
+      const slug   = form.title.toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 24);
+      const symbol = ("DL" + slug.replace(/-/g, "").toUpperCase()).slice(0, 8);
+      const metaJson = JSON.stringify({
+        name:        `DontLeak: ${form.title}`,
+        symbol,
+        description: form.description,
+        image:       fileUrl,
+        external_url: "https://leak.markets",
+        attributes: [{ trait_type: "Protocol", value: "leak.markets" }],
       });
-      if (!metaRes.ok) throw new Error("Metadata upload failed");
-      const { url: metaUrl } = await metaRes.json();
+      const metaFile = new File([metaJson], "metadata.json", { type: "application/json" });
+      const metaUrl = await blobUpload(`token-metadata/${slug}-${Date.now()}.json`, metaFile);
       addLog(`Metadata JSON: ${metaUrl.slice(0, 60)}…`);
 
       addLog("Deploying Pool 2 config (tx 1/2)…");
@@ -150,7 +151,6 @@ export default function LaunchPage() {
 
   return (
     <div className="max-w-2xl mx-auto px-4 py-16">
-      {/* Header */}
       <div className="mb-10">
         <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full border border-green-500/20 bg-green-500/8 mb-4">
           <span className="inline-block w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />
@@ -164,7 +164,6 @@ export default function LaunchPage() {
         </p>
       </div>
 
-      {/* Progress */}
       <div className="flex gap-1 mb-8">
         {(["wallet", "details", "deploy", "done"] as Step[]).map((s, i) => (
           <div
@@ -178,14 +177,12 @@ export default function LaunchPage() {
         ))}
       </div>
 
-      {/* Error */}
       {error && (
         <div className="mb-6 px-4 py-3 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-sm">
           {error}
         </div>
       )}
 
-      {/* Step: wallet */}
       {step === "wallet" && (
         <div className="space-y-4">
           <p className="text-white/70 text-sm">
@@ -201,7 +198,6 @@ export default function LaunchPage() {
         </div>
       )}
 
-      {/* Step: details */}
       {step === "details" && (
         <form
           onSubmit={e => { e.preventDefault(); handleDeploy(); }}
@@ -276,7 +272,6 @@ export default function LaunchPage() {
         </form>
       )}
 
-      {/* Step: deploy / encrypt / register (in-progress) */}
       {(step === "deploy" || step === "encrypt" || step === "register") && (
         <div className="space-y-3">
           <p className="text-white/50 text-sm">
@@ -289,7 +284,6 @@ export default function LaunchPage() {
         </div>
       )}
 
-      {/* Step: done */}
       {step === "done" && result && (
         <div className="space-y-6">
           <div className="p-5 rounded-xl bg-green-500/8 border border-green-500/20">
