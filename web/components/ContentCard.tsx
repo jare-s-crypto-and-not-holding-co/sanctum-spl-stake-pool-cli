@@ -1,6 +1,7 @@
 "use client";
 
 import clsx from "clsx";
+import Link from "next/link";
 import { formatDistanceToNow } from "date-fns";
 import RatioBar from "./RatioBar";
 import ContentTagBadge from "./ContentTag";
@@ -35,9 +36,10 @@ export default function ContentCard({ item, featured = false }: Props) {
   const releasedBytes = Math.floor(r * item.totalBytes);
 
   return (
+    <Link href={`/content/${item.id}`} className="contents">
     <article
       className={clsx(
-        "group relative flex flex-col rounded-2xl border bg-[#13131a] overflow-hidden",
+        "group relative flex flex-col rounded-2xl border bg-[#13131a] overflow-hidden cursor-pointer",
         "transition-all duration-200 hover:scale-[1.015] hover:shadow-xl hover:shadow-black/40",
         featured
           ? "border-green-500/30 shadow-green-500/10 shadow-lg"
@@ -147,5 +149,6 @@ export default function ContentCard({ item, featured = false }: Props) {
         />
       )}
     </article>
+    </Link>
   );
 }
