@@ -62,7 +62,7 @@ export async function deployPool2(
   tx.partialSign(configKp);
   tx.partialSign(dontLeakKp);
 
-  const signed = await wallet.signTransaction(tx);
+  const signed = await wallet.signTransaction(tx) as Transaction;
   const sig    = await conn.sendRawTransaction(signed.serialize(), { skipPreflight: false });
   await conn.confirmTransaction({ signature: sig, blockhash, lastValidBlockHeight }, "confirmed");
 

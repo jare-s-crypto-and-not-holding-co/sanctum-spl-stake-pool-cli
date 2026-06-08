@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
-import { Connection, PublicKey, Transaction } from "@solana/web3.js";
+import { Connection, PublicKey, Transaction, VersionedTransaction } from "@solana/web3.js";
 import { TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID } from "@solana/spl-token";
 import { DynamicBondingCurveClient } from "@meteora-ag/dynamic-bonding-curve-sdk";
 import BN from "bn.js";
@@ -12,6 +12,75 @@ const RPC      = process.env.NEXT_PUBLIC_SOLANA_RPC_URL
 const SOL_MINT  = "So11111111111111111111111111111111111111112";
 const LEAK_MINT = "GbGAcydfEkAnvrfQGZuKNdLMJFRf2LpTKeo1eKxZ48LS";
 const SLIPPAGE  = 100; // 1%
+
+const JUP_ULTRA_BASE = "https://ultra-api.jup.ag";
+const JUP_API_KEY    = process.env.NEXT_PUBLIC_JUP_API_KEY
+  ?? "jup_28e3ef642a4a17666d08a690bcfc996cb1838daf6856b478d383d5e816405b10";
+
+interface UltraOrder {
+  inAmount:    string;
+  outAmount:   string;
+  transaction: string; // base64 VersionedTransaction
+  requestId:   string;
+}
+
+async function ultraOrder(
+  inputMint:  string,
+  outputMint: string,
+  amount:     number,
+  taker:      string,
+): Promise<UltraOrder> {
+  const url = new URL(`${JUP_ULTRA_BASE}/order`);
+  url.searchParams.set("inputMint",  inputMint);
+  url.searchParams.set("outputMint", outputMint);
+  url.searchParams.set("amount",     String(Math.floor(amount)));
+  url.searchParams.set("taker",      taker);
+  url.searchParams.set("slippageBps", String(SLIPPAGE));
+  const res = await fetch(url.toString(), {
+    headers: { "Authorization": `Bearer ${JUP_API_KEY}` },
+  });
+  if (!res.ok) {
+    const msg = await res.json().catch(() => ({}));
+    throw new Error(`Ultra order failed: ${(msg as { error?: string }).error ?? res.status}`);
+  }
+  return res.json();
+}
+
+async function ultraExecute(signedTxBase64: string, requestId: string): Promise<string> {
+  const res = await fetch(`${JUP_ULTRA_BASE}/execute`, {
+    method: "POST",
+    headers: {
+      "Content-Type":  "application/json",
+      "Authorization": `Bearer ${JUP_API_KEY}`,
+    },
+    body: JSON.stringify({ signedTransaction: signedTxBase64, requestId }),
+  });
+  if (!res.ok) {
+    const msg = await res.json().catch(() => ({}));
+    throw new Error(`Ultra execute failed: ${(msg as { error?: string }).error ?? res.status}`);
+  }
+  const data = await res.json() as { status: string; signature?: string; error?: string };
+  if (data.status !== "Success") throw new Error(`Swap failed: ${data.error ?? data.status}`);
+  return data.signature!;
+}
+
+async function ultraSwap(order: UltraOrder, wallet: WalletProvider): Promise<string> {
+  const vTx    = VersionedTransaction.deserialize(Buffer.from(order.transaction, "base64"));
+  const signed = await wallet.signTransaction(vTx) as VersionedTransaction;
+  return ultraExecute(Buffer.from(signed.serialize()).toString("base64"), order.requestId);
+}
+
+// For display-only quote preview (no wallet needed)
+async function jupiterPreviewQuote(inputMint: string, outputMint: string, amount: number) {
+  const url = new URL("https://quote-api.jup.ag/v6/quote");
+  url.searchParams.set("inputMint",   inputMint);
+  url.searchParams.set("outputMint",  outputMint);
+  url.searchParams.set("amount",      String(Math.floor(amount)));
+  url.searchParams.set("slippageBps", String(SLIPPAGE));
+  const res = await fetch(url.toString());
+  if (!res.ok) throw new Error("Quote unavailable");
+  return res.json() as Promise<{ outAmount: string }>;
+}
 
 // SDK hardcodes TOKEN_PROGRAM_ID for tokenQuoteProgram when quote is Token-2022.
 function patchToken2022(tx: Transaction, quoteIsT22: boolean): Transaction {
@@ -24,63 +93,35 @@ function patchToken2022(tx: Transaction, quoteIsT22: boolean): Transaction {
   return tx;
 }
 
-async function jupiterQuote(inputMint: string, outputMint: string, amount: number) {
-  const url = new URL("https://quote-api.jup.ag/v6/quote");
-  url.searchParams.set("inputMint", inputMint);
-  url.searchParams.set("outputMint", outputMint);
-  url.searchParams.set("amount", String(Math.floor(amount)));
-  url.searchParams.set("slippageBps", String(SLIPPAGE));
-  const res = await fetch(url.toString());
-  if (!res.ok) throw new Error("Jupiter quote failed");
-  return res.json();
-}
-
-async function jupiterSwapTx(quoteResponse: unknown, userPublicKey: string): Promise<Transaction> {
-  const res = await fetch("https://quote-api.jup.ag/v6/swap", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      quoteResponse,
-      userPublicKey,
-      asLegacyTransaction: true,
-      dynamicComputeUnitLimit: true,
-      prioritizationFeeLamports: "auto",
-    }),
-  });
-  if (!res.ok) throw new Error("Jupiter swap request failed");
-  const { swapTransaction } = await res.json();
-  return Transaction.from(Buffer.from(swapTransaction, "base64"));
-}
-
 async function sendAndConfirm(
-  conn: Connection,
-  tx: Transaction,
+  conn:   Connection,
+  tx:     Transaction,
   wallet: WalletProvider,
 ): Promise<string> {
   const { blockhash, lastValidBlockHeight } = await conn.getLatestBlockhash("confirmed");
   tx.recentBlockhash = blockhash;
   tx.feePayer = wallet.publicKey;
-  const signed = await wallet.signTransaction(tx);
+  const signed = await wallet.signTransaction(tx) as Transaction;
   const sig    = await conn.sendRawTransaction(signed.serialize(), { skipPreflight: false });
   await conn.confirmTransaction({ signature: sig, blockhash, lastValidBlockHeight }, "confirmed");
   return sig;
 }
 
 async function dbcSwap(
-  conn: Connection,
-  wallet: WalletProvider,
-  poolAddress: string,
-  amountIn: bigint,
-  swapBaseForQuote: boolean, // false = paying quote to receive base
-  quoteIsT22: boolean,
+  conn:             Connection,
+  wallet:           WalletProvider,
+  poolAddress:      string,
+  amountIn:         bigint,
+  swapBaseForQuote: boolean,
+  quoteIsT22:       boolean,
 ): Promise<string> {
   const client = DynamicBondingCurveClient.create(conn, "confirmed");
   const minOut = (amountIn * BigInt(10000 - SLIPPAGE * 2)) / BigInt(10000);
-  const rawTx = await client.pool.swap({
-    owner:               wallet.publicKey,
-    pool:                new PublicKey(poolAddress),
-    amountIn:            new BN(amountIn.toString()),
-    minimumAmountOut:    new BN(minOut.toString()),
+  const rawTx  = await client.pool.swap({
+    owner:                wallet.publicKey,
+    pool:                 new PublicKey(poolAddress),
+    amountIn:             new BN(amountIn.toString()),
+    minimumAmountOut:     new BN(minOut.toString()),
     swapBaseForQuote,
     referralTokenAccount: null,
   });
@@ -92,11 +133,11 @@ function fmt(raw: string | number, decimals = 9) {
 }
 
 export interface SwapWidgetProps {
-  dontLeakPoolAddress: string;  // L2: DontLeak/quoteMint
-  dontLeakMint: string;
-  quoteMint: string;            // rfreestacc or GNcibpKH
-  l1PoolAddress: string;        // L1: quoteMint/LEAK pool
-  quoteDecimals?: number;       // 9 for rfreestacc, 6 for pump.fun
+  dontLeakPoolAddress: string;
+  dontLeakMint:        string;
+  quoteMint:           string;       // rfreestacc or GNcibpKH
+  l1PoolAddress:       string;       // L1: quoteMint/LEAK pool
+  quoteDecimals?:      number;       // 9 for rfreestacc, 6 for pump.fun
 }
 
 type Mode = "leak" | "dontleak";
@@ -110,8 +151,7 @@ export default function SwapWidget({
   const [mode, setMode]         = useState<Mode>("leak");
   const [wallet, setWallet]     = useState<WalletProvider | null>(null);
   const [solInput, setSolInput] = useState("0.1");
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const [jupQuote, setJupQuote] = useState<any>(null);
+  const [leakPreview, setLeakPreview] = useState<string | null>(null);
   const [quoteErr, setQuoteErr] = useState<string | null>(null);
   const [log, setLog]           = useState<string[]>([]);
   const [busy, setBusy]         = useState(false);
@@ -122,7 +162,6 @@ export default function SwapWidget({
 
   const addLog = (msg: string) => setLog(prev => [...prev, msg]);
 
-  // Detect quote mint token program once
   useEffect(() => {
     const conn = new Connection(RPC, "confirmed");
     conn.getAccountInfo(new PublicKey(quoteMint)).then(info => {
@@ -130,32 +169,29 @@ export default function SwapWidget({
     }).catch(() => {});
   }, [quoteMint]);
 
-  const fetchQuote = useCallback(async (sol: string) => {
+  // Display-only preview from v6 (no wallet or taker needed)
+  const fetchPreview = useCallback(async (sol: string) => {
     const lamports = parseFloat(sol) * 1e9;
-    if (!lamports || lamports < 1000) { setJupQuote(null); return; }
+    if (!lamports || lamports < 1000) { setLeakPreview(null); return; }
     try {
       setQuoteErr(null);
-      const q = await jupiterQuote(SOL_MINT, LEAK_MINT, lamports);
-      setJupQuote(q);
+      const q = await jupiterPreviewQuote(SOL_MINT, LEAK_MINT, lamports);
+      setLeakPreview(q.outAmount);
     } catch {
-      setQuoteErr("Quote unavailable");
-      setJupQuote(null);
+      setQuoteErr("Preview unavailable");
+      setLeakPreview(null);
     }
   }, []);
 
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(() => fetchQuote(solInput), 600);
+    debounceRef.current = setTimeout(() => fetchPreview(solInput), 600);
     return () => { if (debounceRef.current) clearTimeout(debounceRef.current); };
-  }, [solInput, fetchQuote]);
+  }, [solInput, fetchPreview]);
 
   async function handleConnect() {
-    try {
-      const w = await connectWallet();
-      setWallet(w);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Wallet failed");
-    }
+    try { setWallet(await connectWallet()); }
+    catch (e) { setError(e instanceof Error ? e.message : "Wallet failed"); }
   }
 
   async function handleSwap() {
@@ -169,23 +205,21 @@ export default function SwapWidget({
       const lamports = parseFloat(solInput) * 1e9;
       if (!lamports || lamports < 1000) throw new Error("Enter a valid SOL amount");
 
-      // ── Step 1: Jupiter SOL → LEAK ───────────────────────────────────────
-      addLog("Fetching Jupiter quote (SOL → LEAK)…");
-      const quote    = await jupiterQuote(SOL_MINT, LEAK_MINT, lamports);
-      const leakOut  = BigInt(quote.outAmount as string);
-      addLog(`~${fmt(lamports)} SOL → ${fmt(leakOut.toString())} LEAK`);
+      // ── Step 1: Jupiter Ultra SOL → LEAK ────────────────────────────────
+      addLog("Fetching Jupiter Ultra order (SOL → LEAK)…");
+      const order   = await ultraOrder(SOL_MINT, LEAK_MINT, lamports, wallet.publicKey.toBase58());
+      const leakOut = BigInt(order.outAmount);
+      addLog(`~${fmt(lamports)} SOL → ~${fmt(leakOut.toString())} LEAK`);
 
-      addLog("Sign tx 1 — SOL → LEAK (Jupiter)");
-      const jupTx = await jupiterSwapTx(quote, wallet.publicKey.toBase58());
-      const sig1  = await sendAndConfirm(conn, jupTx, wallet);
+      addLog("Sign tx 1 — SOL → LEAK (Jupiter Ultra)");
+      const sig1 = await ultraSwap(order, wallet);
       addLog(`✓ LEAK in wallet  (${sig1.slice(0, 16)}…)`);
 
       // ── Step 2: DBC LEAK → quoteMint (L1 pool) ──────────────────────────
-      // swapBaseForQuote: false = paying LEAK (quote in L1) to receive quoteMint (base in L1)
-      if (!l1PoolAddress) throw new Error("L1 pool address not configured — set NEXT_PUBLIC_STABLE_L1_POOL / MEME_L1_POOL");
+      if (!l1PoolAddress) throw new Error("L1 pool not configured — set NEXT_PUBLIC_STABLE_L1_POOL / MEME_L1_POOL");
       addLog("Sign tx 2 — LEAK → quoteMint (DBC L1)");
       const sig2     = await dbcSwap(conn, wallet, l1PoolAddress, leakOut, false, quoteIsT22);
-      const quoteOut = leakOut; // approximate; actual amount settled on-chain
+      const quoteOut = leakOut;
       addLog(`✓ quoteMint received  (${sig2.slice(0, 16)}…)`);
 
       if (mode === "leak") { setDone(sig2); return; }
@@ -202,8 +236,7 @@ export default function SwapWidget({
     }
   }
 
-  const leakAmount = jupQuote ? fmt(jupQuote.outAmount) : null;
-  const isLeak     = mode === "leak";
+  const isLeak = mode === "leak";
 
   return (
     <div className={`rounded-2xl border bg-[#13131a] p-5 ${isLeak ? "border-green-500/20" : "border-red-500/20"}`}>
@@ -253,7 +286,7 @@ export default function SwapWidget({
         <div className="flex justify-between">
           <span className="text-white/30">→ LEAK</span>
           <span className={quoteErr ? "text-red-400/60" : "text-green-400/70"}>
-            {quoteErr ?? (leakAmount ? `~${leakAmount}` : "…")}
+            {quoteErr ?? (leakPreview ? `~${fmt(leakPreview)}` : "…")}
           </span>
         </div>
         <div className="flex justify-between">
@@ -267,7 +300,7 @@ export default function SwapWidget({
           </div>
         )}
         <div className="pt-1 text-white/20 text-[10px]">
-          {isLeak ? "2 txs: Jupiter SOL→LEAK, DBC LEAK→quoteMint" : "3 txs: Jupiter SOL→LEAK, DBC LEAK→quote, DBC quote→DontLeak"}
+          {isLeak ? "2 txs: Jupiter Ultra SOL→LEAK, DBC LEAK→quoteMint" : "3 txs: Jupiter Ultra SOL→LEAK, DBC LEAK→quote, DBC quote→DontLeak"}
         </div>
       </div>
 
@@ -292,7 +325,7 @@ export default function SwapWidget({
       {wallet ? (
         <button
           onClick={handleSwap}
-          disabled={busy || !jupQuote}
+          disabled={busy}
           className={`w-full py-3 rounded-xl font-bold text-sm transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
             isLeak ? "bg-green-500 hover:bg-green-400 text-black" : "bg-red-500 hover:bg-red-400 text-white"
           }`}
