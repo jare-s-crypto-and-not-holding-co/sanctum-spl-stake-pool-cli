@@ -41,7 +41,7 @@ async function deployConfig(
   const tx = Transaction.from(Buffer.from(txBase64, "base64"));
   tx.partialSign(configKp);
 
-  const signed = await wallet.signTransaction(tx);
+  const signed = await wallet.signTransaction(tx) as Transaction;
   const sig    = await conn.sendRawTransaction(signed.serialize(), { skipPreflight: false });
   await conn.confirmTransaction({ signature: sig, blockhash, lastValidBlockHeight }, "confirmed");
 

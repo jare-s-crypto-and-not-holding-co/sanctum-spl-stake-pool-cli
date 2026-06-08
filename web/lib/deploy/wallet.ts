@@ -2,12 +2,12 @@
  * Minimal wallet connector for Phantom / Solflare / any window.solana wallet.
  * Uses the Wallet Standard rather than the full wallet-adapter package.
  */
-import { Connection, Transaction, PublicKey } from "@solana/web3.js";
+import { Connection, Transaction, VersionedTransaction, PublicKey } from "@solana/web3.js";
 
 export type WalletProvider = {
   publicKey: PublicKey;
-  signTransaction: (tx: Transaction) => Promise<Transaction>;
-  signAllTransactions: (txs: Transaction[]) => Promise<Transaction[]>;
+  signTransaction: (tx: Transaction | VersionedTransaction) => Promise<Transaction | VersionedTransaction>;
+  signAllTransactions: (txs: (Transaction | VersionedTransaction)[]) => Promise<(Transaction | VersionedTransaction)[]>;
 };
 
 declare global {
@@ -17,16 +17,16 @@ declare global {
       isPhantom?: boolean;
       connect: (opts?: { onlyIfTrusted?: boolean }) => Promise<{ publicKey: { toBase58(): string } }>;
       disconnect: () => Promise<void>;
-      signTransaction: (tx: Transaction) => Promise<Transaction>;
-      signAllTransactions: (txs: Transaction[]) => Promise<Transaction[]>;
+      signTransaction: (tx: Transaction | VersionedTransaction) => Promise<Transaction | VersionedTransaction>;
+      signAllTransactions: (txs: (Transaction | VersionedTransaction)[]) => Promise<(Transaction | VersionedTransaction)[]>;
     };
     solflare?: {
       publicKey: { toBase58(): string } | null;
       isSolflare?: boolean;
       connect: () => Promise<void>;
       disconnect: () => Promise<void>;
-      signTransaction: (tx: Transaction) => Promise<Transaction>;
-      signAllTransactions: (txs: Transaction[]) => Promise<Transaction[]>;
+      signTransaction: (tx: Transaction | VersionedTransaction) => Promise<Transaction | VersionedTransaction>;
+      signAllTransactions: (txs: (Transaction | VersionedTransaction)[]) => Promise<(Transaction | VersionedTransaction)[]>;
     };
   }
 }
@@ -85,7 +85,7 @@ export async function signAndSend(
     }
   }
 
-  const signed = await wallet.signTransaction(tx);
+  const signed = await wallet.signTransaction(tx) as Transaction;
   const sig    = await conn.sendRawTransaction(signed.serialize(), { skipPreflight: false });
 
   await conn.confirmTransaction({ signature: sig, blockhash, lastValidBlockHeight }, "confirmed");
