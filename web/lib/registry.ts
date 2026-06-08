@@ -12,45 +12,7 @@ import type { ContentEntry } from "./types";
 
 const REGISTRY_URL = process.env.REGISTRY_URL;
 
-/** Seed data — visible immediately at launch */
-const SEED_REGISTRY: ContentEntry[] = [
-  {
-    id: "seed-1",
-    title: "Unreleased Track #001",
-    description: "A finished studio recording. The market decides if the world hears it.",
-    contentType: "text",
-    leakPoolAddress: "11111111111111111111111111111111",   // placeholder until real pools
-    dontLeakPoolAddress: "11111111111111111111111111111111",
-    leakMint: "11111111111111111111111111111111",
-    dontLeakMint: "11111111111111111111111111111111",
-    totalBytes: 4_096,
-    createdAt: Date.now() - 12 * 3_600_000,
-  },
-  {
-    id: "seed-2",
-    title: "Confidential Photo Drop",
-    description: "High-resolution image. Byte by byte — the market controls the exposure.",
-    contentType: "jpeg",
-    leakPoolAddress: "11111111111111111111111111111111",
-    dontLeakPoolAddress: "11111111111111111111111111111111",
-    leakMint: "11111111111111111111111111111111",
-    dontLeakMint: "11111111111111111111111111111111",
-    totalBytes: 512_000,
-    createdAt: Date.now() - 3 * 3_600_000,
-  },
-  {
-    id: "seed-3",
-    title: "Insider Memo",
-    description: "A document someone wants kept secret. Leak holders disagree.",
-    contentType: "text",
-    leakPoolAddress: "11111111111111111111111111111111",
-    dontLeakPoolAddress: "11111111111111111111111111111111",
-    leakMint: "11111111111111111111111111111111",
-    dontLeakMint: "11111111111111111111111111111111",
-    totalBytes: 8_192,
-    createdAt: Date.now() - 36 * 3_600_000,
-  },
-];
+const SEED_REGISTRY: ContentEntry[] = [];
 
 let _cache: ContentEntry[] | null = null;
 let _cacheTime = 0;

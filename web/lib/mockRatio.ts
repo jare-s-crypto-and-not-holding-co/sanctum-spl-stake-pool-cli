@@ -7,11 +7,7 @@ import type { PoolSnapshot } from "./types";
 
 const PLACEHOLDER = "11111111111111111111111111111111";
 
-const MOCK_RATIOS: Record<string, number> = {
-  "seed-1": 0.42,
-  "seed-2": 0.71,
-  "seed-3": 0.18,
-};
+const MOCK_RATIOS: Record<string, number> = {};
 
 export function getMockSnapshot(id: string, poolAddress: string): PoolSnapshot | null {
   if (poolAddress !== PLACEHOLDER) return null;
