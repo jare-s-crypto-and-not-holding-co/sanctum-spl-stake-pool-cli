@@ -9,6 +9,7 @@ import { getRegistry } from "@/lib/registry";
 import { fetchPoolRatio } from "@/lib/solana";
 import { getMockSnapshot } from "@/lib/mockRatio";
 import RatioBar from "@/components/RatioBar";
+import SwapWidget from "@/components/SwapWidget";
 import Link from "next/link";
 
 export const revalidate = 15;
@@ -38,11 +39,6 @@ export default async function ContentDetailPage({ params }: { params: Promise<{ 
 
   const leakPct      = Math.round(r * 100);
   const revealedBytes = Math.floor(r * entry.totalBytes);
-
-  // Meteora swap URLs — deep link into Meteora UI for each pool
-  const METEORA_BASE   = "https://app.meteora.ag/pools";
-  const buyLeakUrl     = `${METEORA_BASE}/${entry.leakPoolAddress}`;
-  const buyDontLeakUrl = `${METEORA_BASE}/${entry.dontLeakPoolAddress}`;
 
   return (
     <div className="max-w-3xl mx-auto px-4 py-12">
@@ -145,29 +141,12 @@ export default async function ContentDetailPage({ params }: { params: Promise<{ 
         </div>
       </div>
 
-      {/* Action buttons */}
-      <div className="grid grid-cols-2 gap-4 mb-8">
-        <a
-          href={buyLeakUrl}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="flex flex-col items-center gap-1.5 py-4 rounded-xl bg-green-500/10 border border-green-500/25 hover:bg-green-500/15 hover:border-green-500/40 transition-colors group"
-        >
-          <span className="text-2xl">📈</span>
-          <span className="font-bold text-green-400 text-sm group-hover:text-green-300">Buy Leak</span>
-          <span className="text-xs text-white/30">Push for more decryption</span>
-        </a>
-
-        <a
-          href={buyDontLeakUrl}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="flex flex-col items-center gap-1.5 py-4 rounded-xl bg-red-500/10 border border-red-500/25 hover:bg-red-500/15 hover:border-red-500/40 transition-colors group"
-        >
-          <span className="text-2xl">🔐</span>
-          <span className="font-bold text-red-400 text-sm group-hover:text-red-300">Buy DontLeak</span>
-          <span className="text-xs text-white/30">Vote for secrecy</span>
-        </a>
+      {/* In-app swap widget */}
+      <div className="mb-8">
+        <SwapWidget
+          dontLeakPoolAddress={entry.dontLeakPoolAddress}
+          dontLeakMint={entry.dontLeakMint}
+        />
       </div>
 
       {/* Pool addresses */}
