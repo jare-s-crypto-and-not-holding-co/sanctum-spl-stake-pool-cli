@@ -17,8 +17,9 @@ import { LitNodeClient } from "@lit-protocol/lit-node-client";
 import { LIT_NETWORK } from "@lit-protocol/constants";
 
 export const LEAK_MINT = "GbGAcydfEkAnvrfQGZuKNdLMJFRf2LpTKeo1eKxZ48LS";
-const LIT_NET = (process.env.NEXT_PUBLIC_LIT_NETWORK as "datil" | "datil-dev" | undefined)
-  ?? LIT_NETWORK.Naga; // Naga = mainnet equivalent
+// Runtime values: "naga" | "naga-dev" | "naga-test" | "custom"
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const LIT_NET: any = process.env.NEXT_PUBLIC_LIT_NETWORK ?? LIT_NETWORK.Naga;
 
 let _client: LitNodeClient | null = null;
 let _connecting = false;
@@ -72,10 +73,10 @@ export async function encryptBytes(
   filename?:   string,
 ): Promise<EncryptedPayload> {
   const client = await getLitClient();
-  const { ciphertext, dataToEncryptHash } = await client.encrypt({
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { ciphertext, dataToEncryptHash } = await (client as any).encrypt({
     solRpcConditions: makeLeakConditions(),
     dataToEncrypt:    data,
-    chain:            "solana",
   });
   return { ciphertext, dataToEncryptHash, contentType, filename };
 }
