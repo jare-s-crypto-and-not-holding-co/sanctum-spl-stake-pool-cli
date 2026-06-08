@@ -24,6 +24,8 @@ export async function POST(req: NextRequest) {
       creator:             body.creator,
       encryptedPayloadUrl: body.encryptedPayloadUrl,
       metadataUrl:         body.metadataUrl,
+      poolType:            body.poolType ?? "stable",
+      quoteMint:           body.quoteMint,
     };
 
     if (!entry.leakPoolAddress || !entry.dontLeakPoolAddress) {
