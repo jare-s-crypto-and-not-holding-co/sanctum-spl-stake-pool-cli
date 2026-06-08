@@ -28,8 +28,8 @@ export async function POST(req: NextRequest) {
       quoteMint:           body.quoteMint,
     };
 
-    if (!entry.leakPoolAddress || !entry.dontLeakPoolAddress) {
-      return NextResponse.json({ error: "leakPoolAddress and dontLeakPoolAddress are required" }, { status: 400 });
+    if (!entry.dontLeakPoolAddress) {
+      return NextResponse.json({ error: "dontLeakPoolAddress is required" }, { status: 400 });
     }
 
     await registerContent(entry);
