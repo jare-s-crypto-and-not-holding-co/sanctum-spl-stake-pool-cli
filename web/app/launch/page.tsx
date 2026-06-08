@@ -12,6 +12,7 @@
  */
 import { useState, useRef } from "react";
 import { Connection } from "@solana/web3.js";
+import { upload } from "@vercel/blob/client";
 import { connectWallet, type WalletProvider } from "@/lib/deploy/wallet";
 import { deployPool2 } from "@/lib/deploy/transactions";
 
@@ -60,19 +61,17 @@ export default function LaunchPage() {
     try {
       const conn = new Connection(RPC, "confirmed");
 
-      // Upload file to Vercel Blob to get a URI
+      // Upload file directly to Vercel Blob (bypasses 4.5MB API route limit)
       let fileUrl = `https://leak.markets/content/placeholder`;
       if (form.file) {
         addLog(`Uploading ${form.file.name} (${(form.file.size / 1024).toFixed(1)} KB)…`);
-        const fd = new FormData();
-        fd.append("file", form.file);
-        fd.append("type", "content");
-        fd.append("filename", form.file.name);
-        const blobRes = await fetch("/api/blob/upload", { method: "POST", body: fd });
-        if (!blobRes.ok) throw new Error("File upload failed");
-        const { url } = await blobRes.json();
-        fileUrl = url;
-        addLog(`Uploaded: ${url.slice(0, 60)}…`);
+        const pathname = `content/${Date.now()}-${form.file.name.replace(/[^a-zA-Z0-9._-]/g, "_")}`;
+        const blob = await upload(pathname, form.file, {
+          access: "public",
+          handleUploadUrl: "/api/blob/upload",
+        });
+        fileUrl = blob.url;
+        addLog(`Uploaded: ${blob.url.slice(0, 60)}…`);
       }
 
       // Upload token metadata JSON

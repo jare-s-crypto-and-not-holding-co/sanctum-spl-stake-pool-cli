@@ -1,61 +1,53 @@
 /**
  * POST /api/blob/upload
  *
- * Uploads a file to Vercel Blob and returns the public URL.
- * Used to store:
- *   - Leak token logo (PNG/SVG)
- *   - DontLeak token logo (PNG/SVG)
- *   - Token metadata JSON (Metaplex standard)
- *   - Encrypted payload metadata JSON
+ * Two-phase client-side upload handler for Vercel Blob.
+ * The browser calls this route to get a client token, then uploads
+ * directly to Blob storage — bypassing the 4.5 MB API route body limit.
  *
- * Body: multipart/form-data with fields:
- *   file      – the file to upload
- *   filename  – desired filename (e.g. "leak-metadata.json")
- *   type      – "token-image" | "token-metadata" | "payload-metadata"
+ * Phase 1 (type=request): browser sends { type, pathname } → server returns clientToken
+ * Phase 2 (type=event):   Blob SDK calls back with upload result
  *
- * Requires BLOB_READ_WRITE_TOKEN env var (set in Vercel project settings).
+ * Requires BLOB_READ_WRITE_TOKEN env var.
  */
-import { put } from "@vercel/blob";
+import { handleUpload, type HandleUploadBody } from "@vercel/blob/client";
 import { NextRequest, NextResponse } from "next/server";
 
 export const runtime = "nodejs";
-export const maxDuration = 60;
-
-// Raise Next.js body size limit to 50 MB for this route
-export const config = {
-  api: { bodyParser: { sizeLimit: "50mb" } },
-};
-
-const ALLOWED_TYPES = new Set(["token-image", "token-metadata", "payload-metadata", "content"]);
 
 export async function POST(req: NextRequest) {
   if (!process.env.BLOB_READ_WRITE_TOKEN) {
+    return NextResponse.json({ error: "BLOB_READ_WRITE_TOKEN not configured" }, { status: 503 });
+  }
+
+  const body = (await req.json()) as HandleUploadBody;
+
+  try {
+    const result = await handleUpload({
+      body,
+      request: req,
+      token: process.env.BLOB_READ_WRITE_TOKEN,
+      onBeforeGenerateToken: async (pathname) => ({
+        allowedContentTypes: [
+          "image/png", "image/jpeg", "image/svg+xml", "image/webp",
+          "audio/mpeg", "audio/wav", "audio/ogg",
+          "video/mp4", "video/webm",
+          "application/json", "text/plain", "application/octet-stream",
+        ],
+        maximumSizeInBytes: 500 * 1024 * 1024, // 500 MB
+        addRandomSuffix: false,
+        pathname,
+      }),
+      onUploadCompleted: async ({ blob }) => {
+        console.log("Blob upload completed:", blob.url);
+      },
+    });
+
+    return NextResponse.json(result);
+  } catch (err: unknown) {
     return NextResponse.json(
-      { error: "BLOB_READ_WRITE_TOKEN not configured" },
-      { status: 503 }
+      { error: err instanceof Error ? err.message : "Upload failed" },
+      { status: 400 },
     );
   }
-
-  const form = await req.formData();
-  const file = form.get("file") as File | null;
-  const filename = (form.get("filename") as string | null) ?? "upload";
-  const type = (form.get("type") as string | null) ?? "payload-metadata";
-
-  if (!file) {
-    return NextResponse.json({ error: "Missing file field" }, { status: 400 });
-  }
-  if (!ALLOWED_TYPES.has(type)) {
-    return NextResponse.json({ error: `Invalid type: ${type}` }, { status: 400 });
-  }
-
-  // Prefix by type so blobs are browsable in the Vercel dashboard
-  const blobPath = `${type}/${Date.now()}-${filename.replace(/[^a-zA-Z0-9._-]/g, "_")}`;
-
-  const blob = await put(blobPath, file.stream(), {
-    access: "public",
-    contentType: file.type || "application/octet-stream",
-    token: process.env.BLOB_READ_WRITE_TOKEN,
-  });
-
-  return NextResponse.json({ url: blob.url, pathname: blob.pathname });
 }
