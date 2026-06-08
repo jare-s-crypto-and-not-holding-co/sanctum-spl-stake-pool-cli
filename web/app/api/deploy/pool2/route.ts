@@ -21,7 +21,8 @@
  * }
  */
 import { NextRequest, NextResponse } from "next/server";
-import { Connection, PublicKey } from "@solana/web3.js";
+import { Connection, PublicKey, Transaction } from "@solana/web3.js";
+import { TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID } from "@solana/spl-token";
 import {
   DynamicBondingCurveClient,
   buildCurveWithMarketCap,
@@ -29,6 +30,20 @@ import {
   MigrationOption, MigrationFeeOption, TokenAuthorityOption,
   BaseFeeMode, deriveDbcPoolAddress,
 } from "@meteora-ag/dynamic-bonding-curve-sdk";
+
+// SDK bug: initializeToken2022Pool hardcodes TOKEN_PROGRAM_ID for tokenQuoteProgram.
+// When the quote mint (LEAK) is Token-2022, every legacy Token account ref must be
+// swapped to TOKEN_2022_PROGRAM_ID before the transaction is sent.
+function patchQuoteTokenProgram(tx: Transaction): Transaction {
+  for (const ix of tx.instructions) {
+    for (const key of ix.keys) {
+      if (key.pubkey.equals(TOKEN_PROGRAM_ID)) {
+        key.pubkey = TOKEN_2022_PROGRAM_ID;
+      }
+    }
+  }
+  return tx;
+}
 
 const RPC_URL   = process.env.SOLANA_RPC_URL ?? "https://mainnet.helius-rpc.com/?api-key=d1c96b01-1c06-4d46-9b69-57e7260fb9d8";
 const LEAK_MINT = new PublicKey("GbGAcydfEkAnvrfQGZuKNdLMJFRf2LpTKeo1eKxZ48LS");
@@ -109,7 +124,7 @@ export async function POST(req: NextRequest) {
     const configParam = buildPool2ConfigParam();
 
     // createConfigAndPool combines config init + pool init into one transaction
-    const tx = await client.partner.createConfigAndPool({
+    const rawTx = await client.partner.createConfigAndPool({
       config:           configPubkey,
       feeClaimer:       payer,
       leftoverReceiver: payer,
@@ -124,6 +139,8 @@ export async function POST(req: NextRequest) {
       },
       ...configParam,
     });
+    // LEAK is Token-2022; patch SDK's hardcoded legacy tokenQuoteProgram account refs
+    const tx = patchQuoteTokenProgram(rawTx);
 
     const { blockhash, lastValidBlockHeight } = await conn.getLatestBlockhash("confirmed");
     tx.recentBlockhash = blockhash;
