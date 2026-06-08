@@ -2,7 +2,7 @@
 
 import { useState, useRef } from "react";
 import { Connection } from "@solana/web3.js";
-import { upload } from "@vercel/blob/client";
+import { put } from "@vercel/blob/client";
 import { connectWallet, type WalletProvider } from "@/lib/deploy/wallet";
 import { deployPool2 } from "@/lib/deploy/transactions";
 
@@ -30,7 +30,7 @@ async function blobUpload(pathname: string, file: File): Promise<string> {
     throw new Error(error);
   }
   const { clientToken } = await res.json();
-  const blob = await upload(pathname, file, { access: "public", token: clientToken });
+  const blob = await put(pathname, file, { access: "public", token: clientToken });
   return blob.url;
 }
 
