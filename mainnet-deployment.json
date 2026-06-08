@@ -1,0 +1,10 @@
+{
+  "network": "mainnet-beta",
+  "platformPubkey": "GYKSfwaTZXJ29vGha39ETNxkBPeBGs6KaRP2eDjaRw6U",
+  "rfstaccMint": "pSYRpDqr847kB2nD5ZhjcPsHLV2ZpUxweXm1MwiSTcc",
+  "leakMint": "GbGAcydfEkAnvrfQGZuKNdLMJFRf2LpTKeo1eKxZ48LS",
+  "pool1ConfigAddress": "8f6NNHdZeBjDdbECzMAb7Xd3Gttfyd2k7SGR5Qzbus6r",
+  "pool1Address": "ze1HvkHogbWPRiR6W5DYp82YrtJTAum1WEDLrUJNjwX",
+  "migrationQuoteThresholdLamports": "10000000000000",
+  "createdAt": "2026-06-08T16:04:30.276Z"
+}

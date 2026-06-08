@@ -1,16 +1,29 @@
 import type { NextConfig } from "next";
+import webpack from "webpack";
 
 const nextConfig: NextConfig = {
   images: {
     remotePatterns: [
-      // Vercel Blob CDN
       { protocol: "https", hostname: "*.public.blob.vercel-storage.com" },
-      // Allow any HTTPS image for token thumbnails
       { protocol: "https", hostname: "**" },
     ],
   },
-  // Vercel Blob requires the body to not be consumed by Next.js
   serverExternalPackages: ["@vercel/blob"],
+  webpack(config, { isServer }) {
+    if (!isServer) {
+      config.resolve.fallback = {
+        ...config.resolve.fallback,
+        fs: false, path: false, os: false,
+        crypto: false, net: false, tls: false,
+        stream: require.resolve("stream-browserify"),
+        buffer: require.resolve("buffer/"),
+      };
+      config.plugins.push(
+        new webpack.ProvidePlugin({ Buffer: ["buffer", "Buffer"] })
+      );
+    }
+    return config;
+  },
 };
 
 export default nextConfig;

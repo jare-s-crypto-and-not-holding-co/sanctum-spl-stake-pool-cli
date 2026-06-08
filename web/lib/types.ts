@@ -1,4 +1,4 @@
-export type ContentType = "png" | "jpeg" | "text";
+export type ContentType = "png" | "jpeg" | "text" | "audio" | "video";
 
 export type ContentTag =
   | "Hot"
@@ -39,7 +39,9 @@ export interface ContentEntry {
   /** URL to the encrypted payload JSON (IPFS / Arweave) */
   encryptedPayloadUrl?: string;
   createdAt: number; // unix ms
+  creator?: string;
   creatorAddress?: string;
+  metadataUrl?: string;
 }
 
 export interface RankedContent extends ContentEntry {
