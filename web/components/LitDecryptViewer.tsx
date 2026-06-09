@@ -58,18 +58,32 @@ export default function LitDecryptViewer({ encryptedPayloadUrl, contentType, rat
     setError(null);
     try {
       // Load Lit dynamically (SSR-safe)
-      const { getLitClient: _connect, decryptBytes, signForLit } = await import("@/lib/lit");
-      await _connect(); // ensure connected
+      let litModule: Awaited<typeof import("@/lib/lit")>;
+      try {
+        litModule = await import("@/lib/lit");
+      } catch (e) {
+        throw new Error(`Lit SDK failed to load: ${e instanceof Error ? e.message : e}`);
+      }
+      const { getLitClient: _connect, decryptBytes, signForLit } = litModule;
+
+      try {
+        await _connect();
+      } catch (e) {
+        throw new Error(`Lit network unreachable: ${e instanceof Error ? e.message : e}`);
+      }
 
       // Fetch the encrypted payload JSON from Blob
-      setState("connecting");
-      const res = await fetch(encryptedPayloadUrl, { cache: "no-store" });
-      if (!res.ok) throw new Error("Failed to fetch encrypted payload");
-      const payload = await res.json() as EncryptedPayload;
+      let payload: EncryptedPayload;
+      try {
+        const res = await fetch(encryptedPayloadUrl, { cache: "no-store" });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        payload = await res.json() as EncryptedPayload;
+      } catch (e) {
+        throw new Error(`Could not fetch encrypted payload: ${e instanceof Error ? e.message : e}`);
+      }
 
       if (!payload.ciphertext || !payload.dataToEncryptHash) {
         // Backward-compat: URL might be a raw file (pre-Lit content)
-        // Just download and show directly
         const raw = await fetch(encryptedPayloadUrl, { cache: "no-store" });
         const buf = await raw.arrayBuffer();
         setDecrypted(new Uint8Array(buf));
@@ -83,11 +97,21 @@ export default function LitDecryptViewer({ encryptedPayloadUrl, contentType, rat
       const pubkey = solana?.publicKey?.toBase58?.();
       if (!pubkey) throw new Error("Connect your Solana wallet first");
 
-      const authSig = await signForLit(pubkey);
+      let authSig: object;
+      try {
+        authSig = await signForLit(pubkey);
+      } catch (e) {
+        throw new Error(`Wallet signing failed: ${e instanceof Error ? e.message : e}`);
+      }
 
       // Decrypt via Lit
       setState("decrypting");
-      const bytes = await decryptBytes(payload, authSig);
+      let bytes: Uint8Array;
+      try {
+        bytes = await decryptBytes(payload, authSig);
+      } catch (e) {
+        throw new Error(`Lit decryption failed: ${e instanceof Error ? e.message : e}`);
+      }
       setDecrypted(bytes);
       setState("done");
     } catch (e: unknown) {

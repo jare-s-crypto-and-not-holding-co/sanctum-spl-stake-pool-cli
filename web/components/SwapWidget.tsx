@@ -227,7 +227,12 @@ export default function SwapWidget({
 
       addLog("Sign tx 1 — SOL → LEAK (Jupiter Ultra)");
       const sig1 = await ultraSwap(order, wallet);
-      addLog(`✓ LEAK in wallet  (${sig1.slice(0, 16)}…)`);
+      addLog(`Confirming LEAK deposit…`);
+      // Jupiter Ultra /execute returns at "processed" commitment; we need
+      // "confirmed" before the DBC swap simulation sees the new LEAK balance.
+      const { blockhash: bh1, lastValidBlockHeight: lvbh1 } = await conn.getLatestBlockhash("confirmed");
+      await conn.confirmTransaction({ signature: sig1, blockhash: bh1, lastValidBlockHeight: lvbh1 }, "confirmed");
+      addLog(`✓ LEAK confirmed  (${sig1.slice(0, 16)}…)`);
 
       // ── Step 2: DBC LEAK → quoteMint (L1 pool) ──────────────────────────
       // Skip if quoteMint IS LEAK (stable pools with no separate L1 pool yet)
