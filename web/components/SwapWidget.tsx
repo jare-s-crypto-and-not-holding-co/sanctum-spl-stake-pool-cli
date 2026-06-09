@@ -102,7 +102,10 @@ async function sendAndConfirm(
   tx.recentBlockhash = blockhash;
   tx.feePayer = wallet.publicKey;
   const signed = await wallet.signTransaction(tx) as Transaction;
-  const sig    = await conn.sendRawTransaction(signed.serialize(), { skipPreflight: false });
+  // skipPreflight: true — simulation runs against a snapshot that may lag
+  // behind the just-confirmed Jupiter tx, producing a false InsufficientFunds.
+  // We've already verified the balance via getTokenBalance; minimumAmountOut=0.
+  const sig    = await conn.sendRawTransaction(signed.serialize(), { skipPreflight: true });
   await conn.confirmTransaction({ signature: sig, blockhash, lastValidBlockHeight }, "confirmed");
   return sig;
 }
