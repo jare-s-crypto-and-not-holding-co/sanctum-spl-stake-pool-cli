@@ -107,6 +107,16 @@ async function sendAndConfirm(
   return sig;
 }
 
+async function getTokenBalance(conn: Connection, owner: PublicKey, mint: PublicKey): Promise<bigint> {
+  try {
+    const accounts = await conn.getParsedTokenAccountsByOwner(owner, { mint });
+    const amount = accounts.value[0]?.account.data.parsed?.info?.tokenAmount?.amount;
+    return amount ? BigInt(amount) : BigInt(0);
+  } catch {
+    return BigInt(0);
+  }
+}
+
 async function dbcSwap(
   conn:             Connection,
   wallet:           WalletProvider,
@@ -114,14 +124,18 @@ async function dbcSwap(
   amountIn:         bigint,
   swapBaseForQuote: boolean,
   quoteIsT22:       boolean,
+  inputMint:        PublicKey,
 ): Promise<string> {
+  // Use actual wallet balance — Jupiter/prior swaps may land slightly less than estimated
+  const actual = await getTokenBalance(conn, wallet.publicKey, inputMint);
+  const safeIn = actual > BigInt(0) ? actual : amountIn;
+
   const client = DynamicBondingCurveClient.create(conn, "confirmed");
-  const minOut = (amountIn * BigInt(10000 - SLIPPAGE * 2)) / BigInt(10000);
   const rawTx  = await client.pool.swap({
     owner:                wallet.publicKey,
     pool:                 new PublicKey(poolAddress),
-    amountIn:             new BN(amountIn.toString()),
-    minimumAmountOut:     new BN(minOut.toString()),
+    amountIn:             new BN(safeIn.toString()),
+    minimumAmountOut:     new BN("0"), // bonding curve — output units ≠ input units
     swapBaseForQuote,
     referralTokenAccount: null,
   });
@@ -223,8 +237,8 @@ export default function SwapWidget({
 
       if (needsL1Swap) {
         addLog("Sign tx 2 — LEAK → quoteMint (DBC L1)");
-        lastSig  = await dbcSwap(conn, wallet, l1PoolAddress, leakOut, false, quoteIsT22);
-        quoteOut = leakOut; // approximate; actual settled on-chain
+        lastSig  = await dbcSwap(conn, wallet, l1PoolAddress, leakOut, false, quoteIsT22, new PublicKey(LEAK_MINT));
+        quoteOut = leakOut;
         addLog(`✓ quoteMint received  (${lastSig.slice(0, 16)}…)`);
       } else {
         addLog("quoteMint = LEAK — skipping L1 pool swap");
@@ -234,7 +248,7 @@ export default function SwapWidget({
 
       // ── Step 3: DBC quoteMint → DontLeak (L2 content pool) ───────────────
       addLog(`Sign tx ${needsL1Swap ? 3 : 2} — quoteMint → DontLeak (DBC L2)`);
-      const sig3 = await dbcSwap(conn, wallet, dontLeakPoolAddress, quoteOut, false, quoteIsT22);
+      const sig3 = await dbcSwap(conn, wallet, dontLeakPoolAddress, quoteOut, false, quoteIsT22, new PublicKey(quoteMint));
       addLog(`✓ DontLeak received  (${sig3.slice(0, 16)}…)`);
       setDone(sig3);
     } catch (e: unknown) {
