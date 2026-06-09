@@ -14,12 +14,10 @@
  */
 
 import { LitNodeClient } from "@lit-protocol/lit-node-client";
-import { LIT_NETWORK } from "@lit-protocol/constants";
 
 export const LEAK_MINT = "GbGAcydfEkAnvrfQGZuKNdLMJFRf2LpTKeo1eKxZ48LS";
-// Runtime values: "naga" | "naga-dev" | "naga-test" | "custom"
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-const LIT_NET: any = process.env.NEXT_PUBLIC_LIT_NETWORK ?? LIT_NETWORK.Naga;
+const LIT_NET: any = process.env.NEXT_PUBLIC_LIT_NETWORK ?? "datil";
 
 let _client: LitNodeClient | null = null;
 let _connecting = false;
