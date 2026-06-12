@@ -5,7 +5,8 @@
   "scripts": {
     "dev": "next dev --webpack",
     "build": "next build --webpack",
-    "start": "next start"
+    "start": "next start",
+    "postinstall": "node scripts/fix-lit-contracts-exports.mjs"
   },
   "dependencies": {
     "@lit-protocol/constants": "^9.0.1",

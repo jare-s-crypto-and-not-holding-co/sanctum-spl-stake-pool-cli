@@ -4,7 +4,7 @@
  * Uses raw fetch (no @solana/web3.js in the edge runtime).
  */
 
-const RPC = process.env.SOLANA_RPC_URL ?? "https://mainnet.helius-rpc.com/?api-key=d1c96b01-1c06-4d46-9b69-57e7260fb9d8";
+const RPC = "https://mainnet.helius-rpc.com/?api-key=89a5704a-97ad-4c43-9be4-f04dc03a6b34";
 
 // Meteora DBC VirtualPool account layout (from the SDK's Anchor IDL):
 //   offset   0 — discriminator (8)
@@ -20,6 +20,12 @@ const RPC = process.env.SOLANA_RPC_URL ?? "https://mainnet.helius-rpc.com/?api-k
 // into the L2 pool's quote vault. (The base vaults move the opposite way —
 // they drain as tokens are bought — so they'd invert the ratio.)
 const QUOTE_VAULT_OFFSET = 200;
+
+// Platform L1 pool (LEAK base / rfstacc quote — pool1Address in
+// mainnet-deployment.json). Entries registered before their L1 pool existed
+// have leakPoolAddress = "" — fall back to global LEAK sentiment from this
+// pool so the leak side isn't permanently stuck at zero.
+const DEFAULT_LEAK_L1_POOL = "ze1HvkHogbWPRiR6W5DYp82YrtJTAum1WEDLrUJNjwX";
 
 async function rpc(method: string, params: unknown[]) {
   const res = await fetch(RPC, {
@@ -97,7 +103,7 @@ export async function fetchPoolRatio(
   dontLeakPoolAddress: string
 ): Promise<PoolReserves> {
   const [leak, dontLeak, slot] = await Promise.all([
-    getVaultBalance(leakPoolAddress),
+    getVaultBalance(leakPoolAddress || DEFAULT_LEAK_L1_POOL),
     getVaultBalance(dontLeakPoolAddress),
     getSlot(),
   ]);
