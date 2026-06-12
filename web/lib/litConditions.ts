@@ -143,10 +143,35 @@ export function tierConditions(i: number, p: TierParams): ConditionSet {
   ];
 }
 
-/** Chunking policy: ~16 KiB chunks, between 4 and 12 of them. */
-export function chunkCountFor(totalBytes: number): number {
-  return Math.max(4, Math.min(12, Math.ceil(totalBytes / 16_384)));
+/**
+ * Chunking policy. Default: ~16 KiB chunks, 4–12 of them. A specific tier
+ * count can be requested (launch form / API), clamped to LIT_MAX_TIERS
+ * (default 64): every tier costs one TEE encrypt at upload and one TEE
+ * decrypt per view, so tier count scales credits + action time linearly.
+ */
+export function chunkCountFor(totalBytes: number, requested?: number): number {
+  // Measured on Chipotle: 512 encrypts run in one execution in ~3.2s
+  // (~5ms/tier), and the ~1MB per-execution size cap is handled by
+  // batching. The practical limit is decrypt latency per page view
+  // (every view re-runs the ladder) — 256 keeps views snappy; push
+  // LIT_MAX_TIERS higher if you accept slower reveals.
+  const max = Number(process.env.LIT_MAX_TIERS ?? 256);
+  if (requested && Number.isFinite(requested) && requested > 0) {
+    return Math.max(2, Math.min(Math.floor(requested), max));
+  }
+  return Math.max(8, Math.min(24, Math.ceil(totalBytes / 8_192)));
 }
+
+/**
+ * Chipotle caps a single action's request/response around 1MB, so encrypt
+ * and decrypt run in BATCHES of executions sized under that budget.
+ * The remaining ceiling is Vercel's ~4.5MB function response (the payload
+ * JSON is ~2.7× the input), hence the default content cap.
+ */
+export const MAX_CONTENT_BYTES = Number(process.env.LIT_MAX_CONTENT_BYTES ?? 1_500_000);
+
+/** Per-execution byte budget for enclave request/response payloads. */
+export const ENCLAVE_BATCH_BUDGET = Number(process.env.LIT_BATCH_BUDGET ?? 600_000);
 
 /**
  * Numeric ladder thresholds for chunk i (used by the Chipotle TEE action,
@@ -160,9 +185,12 @@ export function tierThresholds(
   p: { l1BaselineRaw: bigint; l2QuoteUnitRaw: bigint; chunkCount: number },
 ): { floor?: string; ceiling?: string } {
   if (i === 0) return {};
+  // Exponents are capped so high tier counts can't overflow doubles
+  // (1.15^i) or produce astronomically meaningless BigInt ceilings (2^K).
   const base  = Number(p.l1BaselineRaw < 1n ? 1n : p.l1BaselineRaw);
-  const floor = BigInt(Math.ceil(base * Math.pow(LEAK_GROWTH_PER_TIER, i))).toString();
-  const ceiling = (SUPPRESS_BASE_UNITS * p.l2QuoteUnitRaw * (1n << BigInt(p.chunkCount - 1 - i))).toString();
+  const floor = BigInt(Math.ceil(base * Math.pow(LEAK_GROWTH_PER_TIER, Math.min(i, 200)))).toString();
+  const ceilExp = BigInt(Math.min(p.chunkCount - 1 - i, 24));
+  const ceiling = (SUPPRESS_BASE_UNITS * p.l2QuoteUnitRaw * (1n << ceilExp)).toString();
   return { floor, ceiling };
 }
 
@@ -215,6 +243,13 @@ export interface ChipotlePayload {
   contentType:  string;
   filename?:    string;
   totalBytes:   number;
+  /**
+   * "bytes" (default): chunks are byte ranges; reveal = contiguous prefix.
+   * "image-strips": chunks are horizontal crops of the image, top to
+   * bottom — each strip is a complete, independently renderable image
+   * (byte-prefixes of PNG/WebP don't render at all).
+   */
+  mode?:        "bytes" | "image-strips";
   l1QuoteVault: string;
   l2QuoteVault: string;
   chunks:       ChipotleChunk[];
